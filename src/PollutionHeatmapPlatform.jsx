@@ -1,9 +1,29 @@
-// Nama File: PollutionHeatmapPlatform.jsx (Versi Tersinkronisasi & Canggih)
+// Nama File: PollutionHeatmapPlatform.jsx (Versi Final & Diperbaiki)
 import React, { useState, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Tooltip as LeafletTooltip, LayersControl } from 'react-leaflet';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 import { Wind, Thermometer, Droplets, Factory, CheckCircle, MapPin, CloudSun, CloudRain, Sun, AlertTriangle, Info, BarChartHorizontal, University, Server, Clock, GitCommit, ThermometerSun, Hourglass, ShieldAlert } from 'lucide-react';
+
+// === BAGIAN KRUSIAL UNTUK PERBAIKAN IKON MARKER (VERSI FINAL) ===
 import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Impor SEMUA gambar yang dibutuhkan di sini
+import markerIconPng from "leaflet/dist/images/marker-icon.png";
+import markerShadowPng from "leaflet/dist/images/marker-shadow.png";
+import markerIcon2xPng from 'leaflet/dist/images/marker-icon-2x.png'; // <-- PERBAIKAN: Menggunakan import
+
+// Hapus referensi ke _getIconUrl yang lama (best practice)
+delete L.Icon.Default.prototype._getIconUrl;
+
+// Gabungkan opsi dengan variabel yang sudah diimpor
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2xPng, // <-- PERBAIKAN: Menggunakan variabel dari import
+  iconUrl: markerIconPng,
+  shadowUrl: markerShadowPng
+});
+// =======================================================
+
 
 // --- BAGIAN 1: FUNGSI HELPER & KALKULASI PROFESIONAL ---
 const calculateAQI = (pm25) => {

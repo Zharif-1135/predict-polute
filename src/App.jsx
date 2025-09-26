@@ -1,13 +1,9 @@
-// Nama File: App.jsx (Versi Perbaikan Fullscreen)
+// Nama File: src/App.jsx
 
 import React from 'react';
 import PollutionHeatmapPlatform from './PollutionHeatmapPlatform';
 
-// Pastikan Anda juga mengimpor file CSS utama jika belum
-import './index.css';
-
 function App() {
-  // Langsung render komponen platform tanpa pembungkus apapun
   return (
     <PollutionHeatmapPlatform />
   );
