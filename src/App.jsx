@@ -1,13 +1,16 @@
-import React from 'react'
-import WaterQualityPlatform from './water-quality-platform'
+// Nama File: App.jsx (Versi Perbaikan Fullscreen)
+
+import React from 'react';
+import PollutionHeatmapPlatform from './PollutionHeatmapPlatform';
+
+// Pastikan Anda juga mengimpor file CSS utama jika belum
+import './index.css';
 
 function App() {
+  // Langsung render komponen platform tanpa pembungkus apapun
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">🚀 Water Quality Prediction</h1>
-      <WaterQualityPlatform />
-    </div>
-  )
+    <PollutionHeatmapPlatform />
+  );
 }
 
-export default App
+export default App;
