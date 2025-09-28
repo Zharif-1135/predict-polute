@@ -1,246 +1,345 @@
-// Nama File: PollutionHeatmapPlatform.jsx (Versi Final & Diperbaiki)
-import React, { useState, useEffect, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Tooltip as LeafletTooltip, LayersControl } from 'react-leaflet';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
-import { Wind, Thermometer, Droplets, Factory, CheckCircle, MapPin, CloudSun, CloudRain, Sun, AlertTriangle, Info, BarChartHorizontal, University, Server, Clock, GitCommit, ThermometerSun, Hourglass, ShieldAlert } from 'lucide-react';
-
-// === BAGIAN KRUSIAL UNTUK PERBAIKAN IKON MARKER (VERSI FINAL) ===
-import 'leaflet/dist/leaflet.css';
+// Nama File: PollutionHeatmapPlatform.jsx (Versi Profesional dengan Perbaikan Total UI & Fungsionalitas)
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, LayersControl, useMap, ZoomControl, CircleMarker } from 'react-leaflet';
+import Papa from 'papaparse';
 import L from 'leaflet';
 
-// Impor SEMUA gambar yang dibutuhkan di sini
+// --- Impor Library & Aset ---
+import { Line } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler } from 'chart.js';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+
+// Ikon & Aset
+import { Upload, Wind, Thermometer, Droplets, Factory, ChevronLeft, ChevronRight, AlertTriangle, Info, Loader, Play, Pause, RotateCcw, Calendar, Cloud, Sun, CloudRain, Zap, Haze, CloudDrizzle, Atom, BarChart2, ListOrdered, Building, FileUp, ArrowUp, XCircle } from 'lucide-react';
 import markerIconPng from "leaflet/dist/images/marker-icon.png";
 import markerShadowPng from "leaflet/dist/images/marker-shadow.png";
-import markerIcon2xPng from 'leaflet/dist/images/marker-icon-2x.png'; // <-- PERBAIKAN: Menggunakan import
+import markerIcon2xPng from 'leaflet/dist/images/marker-icon-2x.png';
 
-// Hapus referensi ke _getIconUrl yang lama (best practice)
+// --- Registrasi & Konfigurasi Awal ---
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+
+// Perbaikan bug ikon default Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({ iconRetinaUrl: markerIcon2xPng, iconUrl: markerIconPng, shadowUrl: markerShadowPng });
 
-// Gabungkan opsi dengan variabel yang sudah diimpor
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2xPng, // <-- PERBAIKAN: Menggunakan variabel dari import
-  iconUrl: markerIconPng,
-  shadowUrl: markerShadowPng
+// --- Ikon Kustom untuk Peta ---
+const redFactoryIcon = L.divIcon({
+  html: `<div style="background-color: #dc2626; width: 30px; height: 30px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; color: white; border: 2px solid #fef2f2; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">🏭</div>`,
+  className: 'dummy', iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -30]
 });
-// =======================================================
+
+const getVillageIcon = (isHighlighted = false) => L.divIcon({
+    html: `<div style="font-size: 20px; transition: transform 0.2s ease-in-out; transform: scale(${isHighlighted ? 1.5 : 1}); transform-origin: bottom;">📍</div>`,
+    className: 'dummy',
+    iconSize: [20, 20],
+    iconAnchor: [10, 20],
+    popupAnchor: [0, -20]
+});
 
 
-// --- BAGIAN 1: FUNGSI HELPER & KALKULASI PROFESIONAL ---
-const calculateAQI = (pm25) => {
-  const breakpoints = [
-    { aqi: [0, 50], pm: [0, 12.0] }, { aqi: [51, 100], pm: [12.1, 35.4] },
-    { aqi: [101, 150], pm: [35.5, 55.4] }, { aqi: [151, 200], pm: [55.5, 150.4] },
-    { aqi: [201, 300], pm: [150.5, 250.4] }, { aqi: [301, 500], pm: [250.5, 500.4] },
-  ];
-  const bp = breakpoints.find(b => pm25 >= b.pm[0] && pm25 <= b.pm[1]);
-  if (!bp) return 500;
-  const [I_hi, I_lo] = bp.aqi; const [C_hi, C_lo] = bp.pm;
-  return Math.round(((I_hi - I_lo) / (C_hi - C_lo)) * (pm25 - C_lo) + I_lo);
+// --- KONFIGURASI UTAMA & DATA DESA ---
+const PT_COORDINATES = [4.44, 97.97];
+const MAP_ZOOM_LEVEL = 12;
+const VILLAGES_DATA = [
+    { name: "Alue Ie Puteh", lat: 4.455, lon: 97.985 }, { name: "Blang Nisam", lat: 4.421, lon: 97.965 },
+    { name: "Seuneubok Antara", lat: 4.470, lon: 97.950 }, { name: "Gampong Keude", lat: 4.410, lon: 98.010 },
+    { name: "Paya Meuligoe", lat: 4.485, lon: 98.005 }, { name: "Tualang Dalam", lat: 4.390, lon: 97.940 },
+    { name: "Buket Rata", lat: 4.435, lon: 98.021 }, { name: "Meurandeh", lat: 4.491, lon: 97.962 },
+    { name: "Alue Gampong", lat: 4.385, lon: 98.001 }, { name: "Panton Rayeuk", lat: 4.462, lon: 97.925 },
+];
+
+// --- KOMPONEN-KOMPONEN BANTU ---
+const CircleManager = ({ points }) => {
+    return (
+        <>
+            {points.map((point, index) => (
+                <CircleMarker
+                    key={index}
+                    center={[point[0], point[1]]}
+                    radius={Math.max(5, Math.min(25, point[2] / 5))}
+                    pathOptions={{
+                        color: point[2] > 100 ? '#dc2626' : point[2] > 50 ? '#f59e0b' : '#10b981',
+                        fillColor: point[2] > 100 ? '#dc2626' : point[2] > 50 ? '#f59e0b' : '#10b981',
+                        fillOpacity: 0.6,
+                        weight: 2,
+                        opacity: 0.8
+                    }}
+                >
+                    <Popup>
+                        <div className="text-sm">
+                            <div className="font-bold">Polusi Estimasi</div>
+                            <div>PM10: {point[2].toFixed(2)} mg/Nm³</div>
+                        </div>
+                    </Popup>
+                </CircleMarker>
+            ))}
+        </>
+    );
 };
 
-const getAQIDetails = (aqi) => {
-  if (aqi <= 50) return { category: 'Baik', color: 'text-green-400', hex: '#4ade80' };
-  if (aqi <= 100) return { category: 'Sedang', color: 'text-yellow-400', hex: '#facc15' };
-  if (aqi <= 150) return { category: 'Tidak Sehat (Kelompok Sensitif)', color: 'text-orange-400', hex: '#fb923c' };
-  return { category: 'Tidak Sehat', color: 'text-red-500', hex: '#ef4444' };
+const WindArrow = ({ degrees, speed }) => {
+    if (typeof degrees !== 'number' || typeof speed !== 'number') return null;
+    return (
+        <div className="absolute bottom-4 left-4 z-[1000] p-2 bg-gray-800/70 rounded-lg backdrop-blur-sm text-center">
+            <ArrowUp size={30} style={{ transform: `rotate(${degrees}deg)`, transition: 'transform 0.5s ease-out' }} className="text-white mx-auto"/>
+            <p className="text-xs font-mono mt-1">{speed.toFixed(1)} m/s</p>
+        </div>
+    );
 };
 
-// [BARU] Fungsi untuk mendapatkan status prediksi SVM yang sinkron
-const getSvmPrediction = (aqi) => {
-    if (aqi <= 100) return { title: 'Kualitas Udara Terkendali', desc: 'Prediksi SVM menunjukkan sebaran polutan masih dalam batas aman untuk area sekitar.', color: 'bg-green-500/10 text-green-300', icon: <CheckCircle className="w-8 h-8"/> };
-    if (aqi <= 150) return { title: 'Waspada Peningkatan Polusi', desc: 'Prediksi SVM mendeteksi adanya potensi dampak kesehatan bagi kelompok sensitif di beberapa titik.', color: 'bg-yellow-500/10 text-yellow-300', icon: <AlertTriangle className="w-8 h-8"/> };
-    return { title: 'Tindakan Mitigasi Diperlukan', desc: 'Prediksi SVM mengindikasikan sebaran polutan telah mencapai level tidak sehat yang dapat berdampak pada masyarakat luas.', color: 'bg-red-500/10 text-red-300', icon: <ShieldAlert className="w-8 h-8"/> };
+const DataItem = ({ icon, label, value, unit, color }) => (
+    <div className="flex justify-between items-center py-2.5 border-b border-gray-700/50">
+        <div className="flex items-center gap-3">
+            {icon}
+            <span className="text-gray-300">{label}</span>
+        </div>
+        <div className="font-mono text-white" style={{color: color}}>{value ?? 'N/A'} <span className="text-gray-500 text-xs">{unit}</span></div>
+    </div>
+);
+
+const FileUploader = ({ onFileUpload, title, requiredFileName, isUploaded }) => {
+    const [isDragging, setIsDragging] = useState(false); const inputRef = useRef(null);
+    const handleFile = (file) => { if (file && file.name === requiredFileName) { Papa.parse(file, { header: true, skipEmptyLines: true, complete: (results) => onFileUpload(results.data) }); } else { alert(`File tidak valid. Harap unggah file dengan nama "${requiredFileName}"`); } };
+    const handleDragEvents = (e, dragging) => { e.preventDefault(); e.stopPropagation(); setIsDragging(dragging); };
+    const handleDrop = (e) => { handleDragEvents(e, false); if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); };
+    return (<div onClick={() => inputRef.current.click()} onDrop={handleDrop} onDragOver={(e) => handleDragEvents(e, true)} onDragEnter={(e) => handleDragEvents(e, true)} onDragLeave={(e) => handleDragEvents(e, false)} className={`flex flex-col items-center justify-center p-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors duration-300 ${isUploaded ? 'border-green-500 bg-green-900/50' : 'border-gray-600 hover:border-blue-500 hover:bg-gray-800/50'} ${isDragging ? 'border-blue-500 bg-blue-900/50' : ''}`}><FileUp size={20} className={isUploaded ? "text-green-400" : "text-gray-400"} /> <input type="file" ref={inputRef} onChange={(e) => handleFile(e.target.files[0])} accept=".csv" className="hidden" /> <p className={`mt-2 text-xs font-semibold ${isUploaded ? "text-green-300" : "text-gray-300"}`}>{title}</p> <p className="text-xs text-gray-500">{requiredFileName}</p> {isUploaded && <p className="text-xs text-green-400 mt-1">✓ Berhasil</p>} </div>);
 };
 
-const pollutantDetails = {
-    pm25: { name: 'Partikulat PM₂.₅', desc: 'Partikel udara sangat halus (< 2.5 mikron) yang dapat masuk jauh ke dalam paru-paru dan aliran darah, menjadi risiko kesehatan utama.' },
-    co: { name: 'Karbon Monoksida (CO)', desc: 'Gas beracun yang tidak berbau dan tidak berwarna, hasil dari pembakaran tidak sempurna. Mengurangi kemampuan darah membawa oksigen.' },
-    so2: { name: 'Sulfur Dioksida (SO₂)', desc: 'Gas reaktif yang terkait dengan pembakaran bahan bakar fosil, dapat menyebabkan hujan asam dan masalah pernapasan.' },
-    nox: { name: 'Nitrogen Oksida (NOₓ)', desc: 'Sekelompok gas yang berkontribusi pada pembentukan kabut asap, hujan asam, dan iritasi sistem pernapasan.' },
-};
-
-// [BARU] Fungsi untuk pewarnaan data dinamis
-const getDynamicDataColor = (type, value) => {
-    if (type === 'temp') {
-        if (value > 32) return 'text-orange-400';
-        if (value < 28) return 'text-cyan-400';
-        return 'text-white';
-    }
-    if (type === 'humidity') {
-        if (value > 85) return 'text-blue-400';
-        return 'text-white';
-    }
-    if (type === 'wind') {
-        if (value > 20) return 'text-red-400';
-        return 'text-white';
-    }
-};
-
-// --- BAGIAN 2: KONFIGURASI & SIMULASI DATA ---
-const INDUSTRY_CENTER = { lat: 4.58, lng: 97.75, name: "PT. Medco E&P Malaka", emissions: { co: 250, so2: 180, nox: 120, pm25: 90 } };
-const generateDummySensorData = (center, count, radius, wind) => { /* ... (fungsi ini tetap sama, tidak perlu diubah) ... */
-    const sensors = [];
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * 2 * Math.PI; const distance = Math.random() * radius;
-      const lat = center.lat + (distance * Math.cos(angle)) * 0.1; const lng = center.lng + (distance * Math.sin(angle)) * 0.1;
-      const windAngle = (wind.deg * Math.PI) / 180; const dx = lng - center.lng; const dy = lat - center.lat;
-      const projectedDistance = (dx * Math.cos(windAngle) + dy * Math.sin(windAngle));
-      const decayFactor = Math.max(0, 1 - (distance / radius) * 0.7 - Math.max(0, -projectedDistance * 5));
-      const pm25 = parseFloat((center.emissions.pm25 * decayFactor * (0.8 + Math.random() * 0.4)).toFixed(2));
-      sensors.push({
-        id: i + 1, name: `Sensor ${(i + 1).toString().padStart(3, '0')}`, position: [lat, lng],
-        co: parseFloat((center.emissions.co * decayFactor * (0.8 + Math.random() * 0.4)).toFixed(2)),
-        so2: parseFloat((center.emissions.so2 * decayFactor * (0.8 + Math.random() * 0.4)).toFixed(2)),
-        nox: parseFloat((center.emissions.nox * decayFactor * (0.8 + Math.random() * 0.4)).toFixed(2)),
-        pm25: pm25, aqi: calculateAQI(pm25),
-      });
-    }
-    return sensors;
-};
-const generateDummyBMKGData = () => { /* ... (fungsi ini tetap sama, tidak perlu diubah) ... */
-    const weatherConditions = ['Cerah', 'Berawan', 'Hujan Ringan'];
-    return {
-        temp: parseFloat((27 + Math.random() * 7).toFixed(1)), humidity: Math.floor(60 + Math.random() * 30),
-        wind: { speed: parseFloat((5 + Math.random() * 25).toFixed(1)), deg: Math.floor(Math.random() * 360) },
-        weather: weatherConditions[Math.floor(Math.random() * weatherConditions.length)]
-    };
-};
-
-// --- BAGIAN 3: KOMPONEN UTAMA ---
+// --- KOMPONEN UTAMA ---
 const PollutionHeatmapPlatform = () => {
-  const [sensorData, setSensorData] = useState([]);
-  const [bmkgData, setBmkgData] = useState(generateDummyBMKGData());
-  const [activePollutant, setActivePollutant] = useState('pm25');
-  const [historicalData, setHistoricalData] = useState([]);
-
-  const runSimulation = useCallback(() => { /* ... (fungsi ini tetap sama) ... */
-    const newBmkgData = generateDummyBMKGData(); const newSensorData = generateDummySensorData(INDUSTRY_CENTER, 50, 1.5, newBmkgData.wind);
-    setBmkgData(newBmkgData); setSensorData(newSensorData);
-    setHistoricalData(prevData => {
-      const newData = [...prevData, { time: new Date().toLocaleTimeString(), ...newSensorData.reduce((acc, sensor) => ({
-        co: Math.max(acc.co || 0, sensor.co), so2: Math.max(acc.so2 || 0, sensor.so2),
-        nox: Math.max(acc.nox || 0, sensor.nox), pm25: Math.max(acc.pm25 || 0, sensor.pm25),
-      }), {}) }];
-      return newData.length > 20 ? newData.slice(newData.length - 20) : newData;
-    });
-  }, []);
-
-  useEffect(() => {
-    runSimulation(); const interval = setInterval(runSimulation, 5000);
-    return () => clearInterval(interval);
-  }, [runSimulation]);
-
-  const getPollutantColor = (value, pollutant) => { /* ... (fungsi ini tetap sama) ... */
-    const thresholds = { co: { good: 50, moderate: 150, bad: 250 }, so2: { good: 40, moderate: 100, bad: 180 }, nox: { good: 30, moderate: 80, bad: 120 }, pm25: { good: 15, moderate: 50, bad: 90 },};
-    const t = thresholds[pollutant];
-    if (value < t.good) return "#28a745"; if (value < t.moderate) return "#ffc107";
-    if (value < t.bad) return "#fd7e14"; return "#dc3545";
-  };
+  const [bmkgData, setBmkgData] = useState([]);
+  const [pollutionData, setPollutionData] = useState([]);
+  const [mergedData, setMergedData] = useState([]);
+  const [currentDateIndex, setCurrentDateIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [highlightedVillage, setHighlightedVillage] = useState(null);
   
-  const WeatherIcon = ({ weather }) => { /* ... (fungsi ini tetap sama) ... */
-    if (weather === 'Cerah') return <Sun className="w-5 h-5 text-yellow-400" />; if (weather === 'Berawan') return <CloudSun className="w-5 h-5 text-gray-400" />;
-    if (weather === 'Hujan Ringan') return <CloudRain className="w-5 h-5 text-blue-400" />; return null;
-  };
+  const animationIntervalRef = useRef(null);
+  const mapRef = useRef(null);
+
+  const mergeData = useCallback(() => { 
+    if (bmkgData.length === 0 || pollutionData.length === 0) return; 
+    setIsLoading(true); 
+    setTimeout(() => { // Simulasi loading untuk UX
+      const pollutionMap = new Map(pollutionData.map(item => [item.Tanggal, item])); 
+      const combinedData = bmkgData
+        .map(bmkgItem => (pollutionMap.has(bmkgItem.Tanggal) ? { ...bmkgItem, ...pollutionMap.get(bmkgItem.Tanggal) } : null))
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.Tanggal) - new Date(b.Tanggal)); 
+      setMergedData(combinedData); 
+      setCurrentDateIndex(0); 
+      setIsLoading(false); 
+    }, 500);
+  }, [bmkgData, pollutionData]);
   
-  // Kalkulasi data yang disinkronkan
-  const highestPollutant = sensorData.reduce((max, sensor) => sensor[activePollutant] > max.value ? { value: sensor[activePollutant], name: sensor.name } : max, { value: 0, name: '' });
-  const maxAqiSensor = sensorData.reduce((max, s) => s.aqi > max.aqi ? s : max, { aqi: 0 });
-  const aqiDetails = getAQIDetails(maxAqiSensor.aqi);
-  const svmPrediction = getSvmPrediction(maxAqiSensor.aqi);
-  const windRoseData = [{ direction: 'Angin', speed: bmkgData.wind.speed, angle: bmkgData.wind.deg }];
-  const sensorStatusDistribution = {
-    baik: sensorData.filter(s => s.aqi <= 50).length,
-    sedang: sensorData.filter(s => s.aqi > 50 && s.aqi <= 100).length,
-    tidakSehat: sensorData.filter(s => s.aqi > 100).length,
-  };
-  const dominantPollutant = 'PM₂.₅'; // Simulasi, bisa dibuat lebih kompleks
-  const dispersalTime = bmkgData.wind.speed > 5 ? `~${Math.round(60 / (bmkgData.wind.speed / 10))} Menit` : '> 2 Jam';
+  useEffect(mergeData, [mergeData]);
+  
+  const handleNextDay = useCallback(() => { setCurrentDateIndex(prev => { if (prev >= mergedData.length - 1) { setIsPlaying(false); return prev; } return prev + 1; }); }, [mergedData.length]);
+  const handlePrevDay = () => setCurrentDateIndex(prev => Math.max(prev - 1, 0));
+  const handleReset = () => { setBmkgData([]); setPollutionData([]); setMergedData([]); setCurrentDateIndex(0); setIsPlaying(false); };
+
+  useEffect(() => { if (isPlaying) { animationIntervalRef.current = setInterval(() => { handleNextDay(); }, 200); } else { clearInterval(animationIntervalRef.current); } return () => clearInterval(animationIntervalRef.current); }, [isPlaying, handleNextDay]);
+
+  const currentData = useMemo(() => mergedData[currentDateIndex] || {}, [mergedData, currentDateIndex]);
+  const getPollutionLevel = useCallback((pm10) => { const value = parseFloat(pm10); if (value > 150) return { label: 'Tidak Sehat', color: '#ef4444' }; if (value > 50) return { label: 'Sedang', color: '#f97316' }; if (value > 0) return { label: 'Baik', color: '#22c55e' }; return { label: 'N/A', color: '#9ca3af' }; }, []);
+  
+  const pollutionSpreadPoints = useMemo(() => { 
+    if (!currentData['Partikulat (PM10) (mg/Nm3)']) return []; 
+    const pm10 = parseFloat(currentData['Partikulat (PM10) (mg/Nm3)']); 
+    const windSpeed = parseFloat(currentData.BMKG_WindSpeed_m_s) || 1; 
+    const windRad = (parseFloat(currentData.BMKG_WindDir_deg) - 90) * (Math.PI / 180); 
+    
+    return Array.from({ length: 100 }, (_, i) => { 
+      const distance = (i + 1) * 1000; // Spacing circles every 1km
+      const angle = Math.random() * 2 * Math.PI; 
+      const dX = distance * Math.cos(angle); 
+      const dY = distance * Math.sin(angle) * 0.5; // Elliptical spread
+      const rotatedX = dX * Math.cos(windRad) - dY * Math.sin(windRad); 
+      const rotatedY = dX * Math.sin(windRad) + dY * Math.cos(windRad); 
+      const lat = PT_COORDINATES[0] + rotatedY / 111111; 
+      const lon = PT_COORDINATES[1] + rotatedX / (111111 * Math.cos(PT_COORDINATES[0] * Math.PI / 180)); 
+      const intensity = pm10 * Math.exp(-distance / (3000 * Math.max(windSpeed, 1))); 
+      return intensity > 5 ? [lat, lon, intensity] : null; 
+    }).filter(Boolean); 
+  }, [currentData]);
+  
+  const getWeatherIcon = (weather) => { const w = weather?.toLowerCase() || ''; if (w.includes('hujan ringan')) return <CloudDrizzle size={18} className="text-blue-400" />; if (w.includes('hujan')) return <CloudRain size={18} className="text-blue-400" />; if (w.includes('petir')) return <Zap size={18} className="text-yellow-400" />; if (w.includes('berawan')) return <Cloud size={18} className="text-gray-400" />; if (w.includes('cerah')) return <Sun size={18} className="text-yellow-300" />; return <Haze size={18} className="text-gray-500" />; };
+  const allFilesUploaded = bmkgData.length > 0 && pollutionData.length > 0;
+
+  const rankedVillages = useMemo(() => VILLAGES_DATA.map(village => { const pm10Source = parseFloat(currentData['Partikulat (PM10) (mg/Nm3)']); const windSpeed = parseFloat(currentData.BMKG_WindSpeed_m_s) || 1; const windDir = parseFloat(currentData.BMKG_WindDir_deg) || 0; const dx = (village.lon - PT_COORDINATES[1]) * (111111 * Math.cos(PT_COORDINATES[0] * Math.PI/180)); const dy = (village.lat - PT_COORDINATES[0]) * 111111; const distance = Math.sqrt(dx*dx + dy*dy); const angleToVillage = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360; const windFactor = Math.cos(Math.abs(windDir - angleToVillage) * Math.PI / 180); const estimatedPm10 = (windFactor > 0) ? pm10Source * windFactor * Math.exp(-distance / (2500 * Math.max(windSpeed, 1))) : 0; return { ...village, pm10: Math.max(0, estimatedPm10) }; }).sort((a, b) => b.pm10 - a.pm10), [currentData]);
+
+  const chartData = useMemo(() => ({
+    labels: mergedData.map(d => new Date(d.Tanggal).toLocaleDateString('id-ID', { month: 'short', day: 'numeric' })),
+    datasets: [{
+      label: 'Konsentrasi PM10 (mg/Nm³)',
+      data: mergedData.map(d => parseFloat(d['Partikulat (PM10) (mg/Nm3)']) || 0),
+      borderColor: 'rgba(239, 68, 68, 0.8)',
+      backgroundColor: 'rgba(239, 68, 68, 0.2)',
+      pointBackgroundColor: mergedData.map((_, index) => index === currentDateIndex ? '#ffffff' : 'rgba(239, 68, 68, 0.8)'),
+      pointBorderColor: mergedData.map((_, index) => index === currentDateIndex ? '#ef4444' : 'rgba(239, 68, 68, 0.8)'),
+      pointRadius: mergedData.map((_, index) => index === currentDateIndex ? 6 : 3),
+      pointBorderWidth: mergedData.map((_, index) => index === currentDateIndex ? 2 : 1),
+      fill: true,
+      tension: 0.4,
+    }],
+  }), [mergedData, currentDateIndex]);
+
+  const chartOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { color: '#9ca3af' }, grid: { color: '#4b5563' } }, x: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } } }, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1f2937', titleColor: '#e5e7eb' } } };
 
   return (
-    <div className="bg-gray-900 text-white min-h-screen font-sans flex flex-col">
-      <header className="bg-gray-800/50 backdrop-blur-sm p-4 border-b border-gray-700 flex justify-between items-center z-50">
-          <div className="flex items-center space-x-3"><Factory className="w-8 h-8 text-cyan-400" /><div><h1 className="text-xl font-bold tracking-wider">PLATFORM PREDIKSI POLUSI UDARA</h1><p className="text-xs text-gray-400">PT. Medco E&P Malaka - Aceh Timur | Real-time GIS & SVM Prediction</p></div></div>
-          <div className="text-sm font-mono bg-gray-900 px-3 py-1 rounded-md">{new Date().toLocaleString('id-ID')}</div>
-      </header>
-      <main className="grid grid-cols-1 lg:grid-cols-4 gap-4 p-4 flex-grow">
-        <div className="lg:col-span-3 flex flex-col"><div className="bg-gray-800 rounded-lg shadow-lg p-4 flex-grow"><MapContainer center={[INDUSTRY_CENTER.lat, INDUSTRY_CENTER.lng]} zoom={11} className="h-full w-full rounded-md" scrollWheelZoom={true}><LayersControl position="topright"><LayersControl.BaseLayer checked name="Satelit"><TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution="Esri &mdash; i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"/></LayersControl.BaseLayer><LayersControl.BaseLayer name="Peta Gelap"><TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{y}{r}.png" attribution='&copy; CARTO' /></LayersControl.BaseLayer></LayersControl><Marker position={[INDUSTRY_CENTER.lat, INDUSTRY_CENTER.lng]}><Popup>{INDUSTRY_CENTER.name}</Popup></Marker>{sensorData.map(sensor => (<CircleMarker key={sensor.id} center={sensor.position} pathOptions={{ color: getPollutantColor(sensor[activePollutant], activePollutant), fillColor: getPollutantColor(sensor[activePollutant], activePollutant), fillOpacity: 0.6 }} radius={5 + (sensor[activePollutant] / 20)}><LeafletTooltip><div className="text-left"><span className="font-bold">{sensor.name}</span><br/><hr className="my-1"/>CO: {sensor.co} µg/m³<br/>SO₂: {sensor.so2} µg/m³<br/>NOₓ: {sensor.nox} µg/m³<br/>PM₂.₅: {sensor.pm25} µg/m³<br/><b>ISPU: {sensor.aqi}</b></div></LeafletTooltip></CircleMarker>))}</MapContainer></div></div>
-        <div className="lg:col-span-1 bg-gray-800 rounded-lg shadow-lg p-1 lg:h-[calc(100vh-104px)]"><div className="overflow-y-auto h-full p-3 custom-scrollbar"><div className="flex flex-col gap-4">
-              <div className="bg-gray-900/50 rounded-lg p-4"><h3 className="font-semibold mb-3">Kontrol Peta Heatmap</h3><div className="grid grid-cols-2 gap-2">{['pm25', 'co', 'so2', 'nox'].map(p => (<button key={p} onClick={() => setActivePollutant(p)} className={`p-2 text-sm rounded-md transition-all duration-200 ${activePollutant === p ? 'bg-cyan-500 shadow-lg' : 'bg-gray-700 hover:bg-gray-600'}`}>{p.toUpperCase().replace('PM25', 'PM₂.₅')}</button>))}</div></div>
-              <div className="bg-gray-900/50 rounded-lg p-4"><h3 className="font-semibold mb-3 flex items-center gap-2"><BarChartHorizontal size={18}/> Status Indeks Kualitas Udara (ISPU)</h3><div className='text-center p-2 rounded-lg bg-gray-900'><div className={`text-5xl font-bold ${aqiDetails.color}`}>{maxAqiSensor.aqi}</div><div className={`text-lg font-semibold ${aqiDetails.color}`}>{aqiDetails.category}</div><div className='text-xs text-gray-400 mt-1'>Berdasarkan PM₂.₅ tertinggi</div></div></div>
-              
-              {/* KARTU PREDIKSI SVM YANG SUDAH SINKRON */}
-              <div className="bg-gray-900/50 rounded-lg p-4">
-                  <h3 className="font-semibold mb-3">Status Prediksi</h3>
-                  <div className={`flex items-center gap-3 p-3 rounded-md ${svmPrediction.color}`}>
-                      {svmPrediction.icon}
-                      <div><p className="font-bold">{svmPrediction.title}</p><p className="text-xs">{svmPrediction.desc}</p></div>
-                  </div>
-              </div>
+    <div className="flex h-screen w-screen bg-gray-900 text-white font-sans text-sm overflow-hidden">
+      
+      {/* ================= PANEL KIRI (DATA POLUSI) ================= */}
+      <div className={`z-20 flex flex-col h-full w-96 bg-gray-800/60 backdrop-blur-sm border-r border-gray-700 shadow-2xl p-4 gap-4 transition-opacity duration-500 ${!allFilesUploaded && 'opacity-50 pointer-events-none'}`}>
+        <div className="text-center pb-3 border-b border-gray-700">
+          <h2 className="text-lg font-bold flex items-center justify-center gap-2"><Atom size={20} className="text-red-400"/> Data Polusi Udara</h2>
+          <p className="text-xs text-gray-400">Lokasi: {currentData['Lokasi'] || '...'}</p>
+        </div>
+        
+        <div className="flex-grow overflow-y-auto space-y-4 pr-2">
+            <div>
+              <h3 className="font-semibold text-base mb-2">Parameter Polutan</h3>
+              <DataItem icon={<Atom size={16} className="text-red-400"/>} label="Partikulat (PM10)" value={parseFloat(currentData['Partikulat (PM10) (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" color={getPollutionLevel(currentData['Partikulat (PM10) (mg/Nm3)']).color} />
+              <DataItem icon={<Atom size={16} className="text-yellow-400"/>} label="SO2" value={parseFloat(currentData['SO2 (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+              <DataItem icon={<Atom size={16} className="text-orange-400"/>} label="NOx" value={parseFloat(currentData['NOx (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+              <DataItem icon={<Atom size={16} className="text-blue-400"/>} label="CO" value={parseFloat(currentData['CO (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+              <DataItem icon={<Atom size={16} className="text-green-400"/>} label="CO2" value={parseFloat(currentData['CO2 (%vol)'])?.toFixed(2)} unit="%vol" />
+              <DataItem icon={<Atom size={16} className="text-purple-400"/>} label="HC/VOC" value={parseFloat(currentData['HC/VOC (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+              <DataItem icon={<Atom size={16} className="text-pink-400"/>} label="H2S" value={parseFloat(currentData['H2S (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+              <DataItem icon={<Atom size={16} className="text-cyan-400"/>} label="NH3" value={parseFloat(currentData['NH3 (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+              <DataItem icon={<Atom size={16} className="text-indigo-400"/>} label="Pb" value={parseFloat(currentData['Pb (mg/Nm3)'])?.toFixed(2)} unit="mg/Nm³" />
+            </div>
 
-              {/* FITUR BARU: Polutan Dominan & Estimasi Dispersi */}
-              <div className="bg-gray-900/50 rounded-lg p-4 grid grid-cols-2 gap-4">
+            <div>
+                <h3 className="font-semibold text-base mb-2 flex items-center gap-2">
+                    Ranking Desa Terdampak
+                    <span title="Estimasi dampak PM10 di setiap desa berdasarkan kekuatan sumber emisi, kecepatan & arah angin, serta jarak."><Info size={14} className="text-gray-500 cursor-help" /></span>
+                </h3>
+                 <div className="text-xs space-y-1.5 pl-2 max-h-36 overflow-y-auto">
+                    {rankedVillages.map((village, index) => (
+                      <div key={village.name} onMouseEnter={() => setHighlightedVillage(village.name)} onMouseLeave={() => setHighlightedVillage(null)} className="flex justify-between items-center p-1 rounded-md hover:bg-gray-700/50 transition-colors cursor-pointer">
+                        <span className='truncate pr-2'>{index + 1}. {village.name}</span>
+                        <span className="font-bold font-mono" style={{color: getPollutionLevel(village.pm10).color}}>{village.pm10.toFixed(2)}</span>
+                      </div>
+                    ))}
+                 </div>
+            </div>
+
+            {allFilesUploaded && (
                 <div>
-                    <h4 className="font-semibold text-xs text-cyan-400 mb-1 flex items-center gap-1"><Info size={14}/> Polutan Dominan</h4>
-                    <p className="text-xl font-bold">{dominantPollutant}</p>
+                    <h3 className="font-semibold text-base mb-2">Tren Historis PM10</h3>
+                    <div className="h-40">
+                        <Line options={chartOptions} data={chartData} />
+                    </div>
                 </div>
+            )}
+        </div>
+      </div>
+
+      {/* ================= AREA PETA (TENGAH) ================= */}
+      <main className="flex-grow relative">
+        <MapContainer ref={mapRef} center={PT_COORDINATES} zoom={MAP_ZOOM_LEVEL} className="h-full w-full bg-gray-700" zoomControl={false}>
+          <ZoomControl position="bottomright" />
+          <LayersControl position="topright">
+            <LayersControl.BaseLayer checked name="Satelit"><TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution="&copy; Esri"/></LayersControl.BaseLayer>
+            <LayersControl.BaseLayer name="Peta Jalan"><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap'/></LayersControl.BaseLayer>
+          </LayersControl>
+          
+          {allFilesUploaded && pollutionSpreadPoints.length > 0 && <CircleManager points={pollutionSpreadPoints} />}
+          <Marker position={PT_COORDINATES} icon={redFactoryIcon}><Popup><b>PT Medco E&P Malaka</b><br/>Lokasi Sumber Emisi</Popup></Marker>
+          {VILLAGES_DATA.map(village => ( <Marker key={village.name} position={[village.lat, village.lon]} icon={getVillageIcon(highlightedVillage === village.name)}> <Popup> <div className="text-sm"> <div className="font-bold border-b pb-1 mb-1">{village.name}</div></div></Popup> </Marker> ))}
+        </MapContainer>
+
+        {isLoading && (<div className="absolute inset-0 z-[1001] bg-gray-900/70 flex flex-col items-center justify-center"><Loader size={48} className="animate-spin text-blue-400" /><p className="mt-4 text-lg">Menggabungkan & Memproses Data...</p></div>)}
+
+        {!allFilesUploaded && !isLoading && (
+            <div className="absolute inset-0 z-[1000] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center text-center p-8">
                 <div>
-                    <h4 className="font-semibold text-xs text-cyan-400 mb-1 flex items-center gap-1"><Hourglass size={14}/> Estimasi Dispersi</h4>
-                    <p className="text-xl font-bold">{dispersalTime}</p>
+                    <h1 className="text-3xl font-bold text-white mb-2">Selamat Datang di Platform Heatmap Polusi</h1>
+                    <p className="text-gray-300 max-w-xl mx-auto">Untuk memulai analisis, silakan unggah <strong className="text-white">data polusi</strong> dan <strong className="text-white">data BMKG</strong> menggunakan panel di sebelah kanan.</p>
                 </div>
-              </div>
-              
-              {/* DATA LINGKUNGAN DENGAN PEWARNAAN DINAMIS */}
-              <div className="bg-gray-900/50 rounded-lg p-4">
-                  <h3 className="font-semibold mb-3">Data Lingkungan (BMKG)</h3>
-                  <div className="space-y-3 text-sm">
-                      <div className="flex justify-between items-center"><span className="flex items-center gap-2"><Thermometer className="w-4 h-4" /> Suhu Udara</span> <span className={`font-bold transition-colors duration-500 ${getDynamicDataColor('temp', bmkgData.temp)}`}>{bmkgData.temp}°C</span></div>
-                      <div className="flex justify-between items-center"><span className="flex items-center gap-2"><Droplets className="w-4 h-4" /> Kelembaban</span> <span className={`font-bold transition-colors duration-500 ${getDynamicDataColor('humidity', bmkgData.humidity)}`}>{bmkgData.humidity}%</span></div>
-                      <div className="flex justify-between items-center"><span className="flex items-center gap-2"><Wind className="w-4 h-4" /> Angin</span> <span className={`font-bold transition-colors duration-500 ${getDynamicDataColor('wind', bmkgData.wind.speed)}`}>{bmkgData.wind.speed} km/j ({bmkgData.wind.deg}°)</span></div>
-                      <div className="flex justify-between items-center"><span className="flex items-center gap-2"><WeatherIcon weather={bmkgData.weather} /> Cuaca</span> <span className="font-bold">{bmkgData.weather}</span></div>
-                  </div>
-              </div>
-              
-              <div className="bg-gray-900/50 rounded-lg p-4">
-                  <h3 className="font-semibold mb-3 flex items-center gap-2"><Clock size={18}/> Prakiraan Cuaca 3 Jam ke Depan</h3>
-                  <div className="flex justify-around text-center text-xs text-gray-400">
-                      <div className="flex flex-col items-center gap-1"><span>+1 Jam</span><CloudSun size={22}/><span className="font-bold text-white">{(bmkgData.temp - 0.5).toFixed(1)}°C</span></div>
-                      <div className="flex flex-col items-center gap-1"><span>+2 Jam</span><CloudRain size={22}/><span className="font-bold text-white">{(bmkgData.temp - 1).toFixed(1)}°C</span></div>
-                      <div className="flex flex-col items-center gap-1"><span>+3 Jam</span><Sun size={22}/><span className="font-bold text-white">{bmkgData.temp.toFixed(1)}°C</span></div>
-                  </div>
-              </div>
-              
-              {/* MAWAR ANGIN DENGAN ANIMASI */}
-              <div className="bg-gray-900/50 rounded-lg p-4">
-                  <h3 className="font-semibold mb-3 flex items-center gap-2"><Wind size={18}/> Visualisasi Mawar Angin</h3>
-                  <div className="h-40 wind-rose-container" style={{'--wind-angle': `${bmkgData.wind.deg}deg`}}>
-                      <ResponsiveContainer width="100%" height="100%">
-                          <RadarChart cx="50%" cy="50%" outerRadius="80%" data={windRoseData}>
-                              <PolarGrid stroke="#4A5568"/>
-                              <PolarAngleAxis dataKey="direction" tick={{ fill: 'transparent' }} />
-                              <PolarRadiusAxis angle={90} domain={[0, 40]} tick={false} axisLine={false} />
-                              <Radar name="Kecepatan" dataKey="speed" stroke={aqiDetails.hex} fill={aqiDetails.hex} fillOpacity={0.7} className="radar-point"/>
-                          </RadarChart>
-                      </ResponsiveContainer>
-                  </div>
-              </div>
-              
-              <div className="bg-gray-900/50 rounded-lg p-4"><h3 className="font-semibold mb-3 flex items-center gap-2"><Server size={18}/> Distribusi Status Sensor</h3><div className="text-xs space-y-2"><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-green-500"></div><div className="flex-grow">Baik ({sensorStatusDistribution.baik} sensor)</div></div><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500"></div><div className="flex-grow">Sedang ({sensorStatusDistribution.sedang} sensor)</div></div><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500"></div><div className="flex-grow">Tidak Sehat ({sensorStatusDistribution.tidakSehat} sensor)</div></div></div></div>
-              <div className="bg-gray-900/50 rounded-lg p-4 h-64"><h3 className="font-semibold mb-3">Tren Polutan Maksimum</h3><ResponsiveContainer width="100%" height="100%"><LineChart data={historicalData} margin={{ top: 5, right: 10, left: -20, bottom: 20 }}><CartesianGrid strokeDasharray="3 3" stroke="#4A5568" /><XAxis dataKey="time" stroke="#A0AEC0" fontSize={10} /><YAxis stroke="#A0AEC0" fontSize={10}/><RechartsTooltip contentStyle={{ backgroundColor: '#1A202C', border: '1px solid #4A5568' }} /><Legend iconSize={10} wrapperStyle={{fontSize: "12px"}}/><Line type="monotone" dataKey="pm25" name="PM₂.₅" stroke="#8884d8" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="co" name="CO" stroke="#82ca9d" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="so2" name="SO₂" stroke="#ffc658" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div>
-              
-              {/* FITUR BARU: Status Data */}
-              <div className="bg-gray-900/50 rounded-lg p-4 text-xs text-gray-400"><h3 className="font-semibold mb-3 flex items-center gap-2"><GitCommit size={18}/> Status Data</h3><div className="flex justify-between"><span>Sumber:</span> <span>Sensor & BMKG</span></div><div className="flex justify-between"><span>Pembaruan Terakhir:</span> <span>{new Date().toLocaleTimeString('id-ID')}</span></div></div>
-        </div></div></div>
+            </div>
+        )}
+        
+        {allFilesUploaded && (
+            <>
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1002] w-full max-w-4xl px-4">
+                    <div className="bg-gray-800/90 backdrop-blur-md rounded-lg p-4 shadow-2xl border border-gray-600">
+                        <div className="flex items-center gap-4 justify-between mb-3">
+                            <button onClick={handlePrevDay} disabled={currentDateIndex === 0} className="p-2.5 rounded-full bg-gray-700/70 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 border border-gray-600"><ChevronLeft size={22}/></button>
+                            <div className="flex-grow text-center">
+                                <p className="font-semibold text-xl text-white">{new Date(currentData.Tanggal || Date.now()).toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                                <p className="text-sm text-gray-300 mt-1">Data ke-{currentDateIndex + 1} dari {mergedData.length} hari</p>
+                            </div>
+                            <DatePicker 
+                                selected={new Date(currentData.Tanggal || Date.now())} 
+                                onChange={(date) => { 
+                                    const dateString = date.toISOString().split('T')[0]; 
+                                    const index = mergedData.findIndex(d => d.Tanggal === dateString); 
+                                    if (index !== -1) setCurrentDateIndex(index); 
+                                }} 
+                                dateFormat="dd/MM/yyyy" 
+                                customInput={<button className="p-2.5 rounded-full bg-gray-700/70 hover:bg-blue-600 transition-all duration-200 border border-gray-600" title="Pilih Tanggal"><Calendar size={22}/></button>} 
+                            />
+                            <button onClick={() => setIsPlaying(!isPlaying)} className="p-2.5 rounded-full bg-gray-700/70 hover:bg-green-600 transition-all duration-200 border border-gray-600" title={isPlaying ? "Pause" : "Play"}> 
+                                {isPlaying ? <Pause size={22}/> : <Play size={22}/>} 
+                            </button>
+                            <button onClick={handleNextDay} disabled={currentDateIndex >= mergedData.length - 1} className="p-2.5 rounded-full bg-gray-700/70 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 border border-gray-600"><ChevronRight size={22}/></button>
+                        </div>
+                        <div className="relative">
+                            <input 
+                                type="range" 
+                                min="0" 
+                                max={mergedData.length > 0 ? mergedData.length - 1 : 0} 
+                                value={currentDateIndex} 
+                                onChange={(e) => setCurrentDateIndex(Number(e.target.value))} 
+                                className="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-thumb" 
+                                style={{
+                                    background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentDateIndex / (mergedData.length - 1)) * 100}%, #4b5563 ${(currentDateIndex / (mergedData.length - 1)) * 100}%, #4b5563 100%)`
+                                }}
+                            />
+                            <div className="flex justify-between text-xs text-gray-400 mt-2">
+                                <span>{mergedData[0]?.Tanggal ? new Date(mergedData[0].Tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : ''}</span>
+                                <span>{mergedData[mergedData.length - 1]?.Tanggal ? new Date(mergedData[mergedData.length - 1].Tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : ''}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <WindArrow degrees={parseFloat(currentData.BMKG_WindDir_deg)} speed={parseFloat(currentData.BMKG_WindSpeed_m_s)} />
+            </>
+        )}
       </main>
-      <footer className="bg-gray-900 border-t border-gray-700 p-4 text-center text-gray-400 text-xs">
-          <div className="flex justify-center items-center gap-4"><University size={24}/><div><p>&copy; 2025 | Penelitian PNBP Universitas Malikussaleh</p><p className='font-bold'>Sistem Informasi Prediksi Sebaran Polutan Emisi Industri Menggunakan Metode SVM</p></div></div>
-      </footer>
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
-        .wind-rose-container .recharts-polar-radius-axis { transform-origin: center; transition: transform 0.8s ease-in-out; transform: rotate(var(--wind-angle)); }
-        @keyframes pulse-radar { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(1.2); } }
-        .wind-rose-container .radar-point path { animation: pulse-radar 2s infinite; }
-      `}</style>
+
+      {/* ================= PANEL KANAN (DATA BMKG) ================= */}
+      <div className="z-20 flex flex-col h-full w-96 bg-gray-800/60 backdrop-blur-sm border-l border-gray-700 shadow-2xl p-4 gap-4">
+        <div className="text-center pb-3 border-b border-gray-700">
+            <h2 className="text-lg font-bold flex items-center justify-center gap-2"><Cloud size={20} className="text-blue-300"/> Data Meteorologi</h2>
+            <p className="text-xs text-gray-400">Sumber: BMKG</p>
+        </div>
+        
+        <div className={`flex-grow overflow-y-auto space-y-4 pr-2 transition-opacity duration-500 ${!allFilesUploaded && 'opacity-50 pointer-events-none'}`}>
+            <div>
+                <h3 className="font-semibold text-base mb-2">Parameter Cuaca Hari Ini</h3>
+                <DataItem icon={<Thermometer size={16} className="text-red-400"/>} label="Suhu" value={currentData.BMKG_Temp_C} unit="°C" />
+                <DataItem icon={<Droplets size={16} className="text-blue-400"/>} label="Kelembapan" value={currentData.BMKG_RH_pct} unit="%" />
+                <DataItem icon={<Wind size={16} className="text-green-400"/>} label="Kecepatan Angin" value={currentData.BMKG_WindSpeed_m_s} unit="m/s" />
+                <DataItem icon={<Wind size={16} className="text-green-400"/>} label="Arah Angin" value={currentData.BMKG_WindDir_deg} unit="°" />
+                <DataItem icon={getWeatherIcon(currentData.BMKG_Weather)} label="Cuaca" value={currentData.BMKG_Weather} />
+                <DataItem icon={<CloudRain size={16} className="text-cyan-400"/>} label="Curah Hujan" value={currentData.BMKG_Precip_mm} unit="mm" />
+            </div>
+        </div>
+
+        <div className="flex flex-col pt-2 border-t border-gray-700">
+            <h3 className="font-semibold text-base mb-2">Manajemen Data</h3>
+             <div className="grid grid-cols-2 gap-3">
+                <FileUploader onFileUpload={setPollutionData} title="Data Polusi" requiredFileName="data_pollution.csv" isUploaded={pollutionData.length > 0} />
+                <FileUploader onFileUpload={setBmkgData} title="Data BMKG" requiredFileName="data_bmkg.csv" isUploaded={bmkgData.length > 0} />
+             </div>
+             {allFilesUploaded && <button onClick={handleReset} className="mt-3 w-full flex items-center justify-center gap-2 text-xs py-2 px-4 bg-red-800/70 hover:bg-red-700 rounded-lg transition-colors"><XCircle size={14}/> Reset Data & Mulai Ulang</button>}
+        </div>
+      </div>
     </div>
   );
 };
