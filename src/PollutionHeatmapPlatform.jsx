@@ -552,9 +552,8 @@ const PollutionHeatmapPlatform = () => {
         {!allFilesUploaded && !isLoading && !isPredictionMode && predictionResults.length === 0 && (
             <div className="absolute inset-0 z-[1000] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center text-center p-8">
                 <div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Selamat Datang di Platform Heatmap Polusi</h1>
+                    <h1 className="text-3xl font-bold text-white mb-2">Selamat Datang di Platform Heatmap Polusi</h1> <strong className='text-green-400'>Universitas Malikussaleh</strong>
                     <p className="text-gray-300 max-w-xl mx-auto">Untuk memulai analisis, silakan unggah <strong className="text-white">data polusi</strong> dan <strong className="text-white">data BMKG</strong> menggunakan panel di sebelah kanan.</p>
-                    <p className="text-gray-400 max-w-xl mx-auto mt-2 text-sm">Atau gunakan mode <strong className="text-green-400">Prediksi</strong> untuk memprediksi kondisi polusi 7 hari ke depan (membutuhkan 1 file polusi historis).</p>
                 </div>
             </div>
         )}
